@@ -19,6 +19,9 @@
  * Intel Corporation is the author of the Materials, and requests that all
  * problem reports or change requests be submitted to it directly
  *****************************************************************************/
+ // Suppress a compiler warning about undefined CL_TARGET_OPENCL_VERSION
+ // Khronos ICD supports only latest OpenCL version
+#define CL_TARGET_OPENCL_VERSION 220
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,9 +29,7 @@
 #include <memory.h>
 #include <windows.h>
 
-// Suppress a compiler warning about undefined CL_TARGET_OPENCL_VERSION
-// Khronos ICD supports only latest OpenCL version
-#define CL_TARGET_OPENCL_VERSION 220
+
 
 #include "CL\cl.h"
 #include "CL\cl_ext.h"

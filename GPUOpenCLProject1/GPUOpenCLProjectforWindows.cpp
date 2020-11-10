@@ -19,7 +19,7 @@
  * Intel Corporation is the author of the Materials, and requests that all
  * problem reports or change requests be submitted to it directly
  *****************************************************************************/
-
+#define CL_TARGET_OPENCL_VERSION 220
 #include <stdio.h>
 #include <stdlib.h>
 #include <tchar.h>
@@ -31,10 +31,16 @@
  //for perf. counters
 #include <Windows.h>
 
-
+#include <iostream>
 // Macros for OpenCL versions
 #define OPENCL_VERSION_1_2  1.2f
 #define OPENCL_VERSION_2_0  2.0f
+
+
+
+// Suppress a compiler warning about 'clCreateCommandQueue': was declared deprecated
+// for OpenCL 1.2
+#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 
 /* This function helps to create informative messages in
  * case when OpenCL errors occur. It returns a string
@@ -314,6 +320,7 @@ bool CheckPreferredPlatformMatch(cl_platform_id platform, const char* preferredP
  */
 cl_platform_id FindOpenCLPlatform(const char* preferredPlatform, cl_device_type deviceType)
 {
+
 	cl_uint numPlatforms = 0;
 	cl_int err = CL_SUCCESS;
 
@@ -334,6 +341,36 @@ cl_platform_id FindOpenCLPlatform(const char* preferredPlatform, cl_device_type 
 	}
 
 	std::vector<cl_platform_id> platforms(numPlatforms);
+
+	cl_uint status;
+	cl_platform_id platform;
+	std::string platformVendor;
+	if (0 < numPlatforms)
+	{
+		cl_platform_id* platforms = new cl_platform_id[numPlatforms];
+		status = clGetPlatformIDs(numPlatforms, platforms, &numPlatforms);
+
+		char platformName[100];
+		for (unsigned i = 0; i < numPlatforms; ++i)
+		{
+			status = clGetPlatformInfo(platforms[i],
+				CL_PLATFORM_VENDOR,
+				sizeof(platformName),
+				platformName,
+				NULL);
+
+			platform = platforms[i];
+			platformVendor.assign(platformName);
+			return platforms[0];
+			if (!strcmp(platformName, "Advanced Micro Devices, Inc."))
+			{
+				break;
+			}
+		}
+
+		//std::cout << "Platform found : " << platformName << "\n";
+		delete[] platforms;
+	}
 
 	// Now, obtains a list of numPlatforms OpenCL platforms available
 	// The list of platforms available will be returned in platforms
@@ -389,7 +426,7 @@ cl_platform_id FindOpenCLPlatform(const char* preferredPlatform, cl_device_type 
  * Later it will enable us to support both OpenCL 1.2 and 2.0 platforms and devices
  * in the same program.
  */
-int GetPlatformAndDeviceVersion (cl_platform_id platformId, ocl_args_d_t *ocl)
+int GetPlatformAndDeviceVersion(cl_platform_id platformId, ocl_args_d_t *ocl)
 {
 	cl_int err = CL_SUCCESS;
 
@@ -484,8 +521,8 @@ void generateInput(cl_float2* inputArray, cl_uint size)
 	for (cl_uint i = 0; i < size; ++i)
 	{
 		inputArray[i].x = ((float)rand() / (float)(RAND_MAX)) * (float)1.0;
-		inputArray[i].y = ((float)rand() / (float)(RAND_MAX)) * (float)1.0;
-		//inputArray[i].y = 0;
+		//inputArray[i].y = ((float)rand() / (float)(RAND_MAX)) * (float)1.0;
+		inputArray[i].y = 0;
 		LogError("x: %f.", inputArray[i].x);
 		LogError("y: %f.\n", inputArray[i].y);
 	}
@@ -529,14 +566,18 @@ int SetupOpenCL(ocl_args_d_t *ocl, cl_device_type deviceType)
 
 	// Query for all available OpenCL platforms on the system
 	// Here you enumerate all platforms and pick one which name has preferredPlatform as a sub-string
-	cl_platform_id platformId = FindOpenCLPlatform("Intel", deviceType);
-	//cl_platform_id platformId = FindOpenCLPlatform("NVIDIA", deviceType);
+	//cl_platform_id platformId = FindOpenCLPlatform("Intel", deviceType);
+	cl_platform_id platformId = FindOpenCLPlatform("NVIDIA", deviceType);
 	if (NULL == platformId)
 	{
 		LogError("Error: Failed to find OpenCL platform.\n");
 		return CL_INVALID_VALUE;
 	}
-
+	//创建GPU设备
+	clGetDeviceIDs(platformId, CL_DEVICE_TYPE_GPU,
+		1,
+		&ocl->device,
+		NULL);
 	// Create context with device of specified type.
 	// Required device type is passed as function argument deviceType.
 	// So you may use this function to create context for any CPU or GPU OpenCL device.
@@ -577,7 +618,7 @@ int SetupOpenCL(ocl_args_d_t *ocl, cl_device_type deviceType)
 	}
 #else
 	// default behavior: OpenCL 1.2
-	cl_command_queue_properties properties = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
+	cl_command_queue_properties properties = CL_QUEUE_PROFILING_ENABLE;
 	ocl->commandQueue = clCreateCommandQueue(ocl->context, ocl->device, properties, &err);
 #endif
 	if (CL_SUCCESS != err)
@@ -588,8 +629,8 @@ int SetupOpenCL(ocl_args_d_t *ocl, cl_device_type deviceType)
 
 	return CL_SUCCESS;
 }
-std::string openclcode = "\r\n\r\ntypedef float2 complex;\r\n\r\n            complex twiddle(uint k, float angle)\r\n            {\r\n                float x; float y = sincos(k * angle, &x); return (complex)(x, y);\r\n            }\r\n\r\n            complex complex_mul(float2 a, float2 b)\r\n            {\r\n                return (complex)(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);\r\n            }\r\n\r\n            __kernel void FFT_2(__global complex*input, __global complex*output, uint Ns ) {\r\n\r\n                uint work_item_id = get_global_id(0);\r\n                uint num_work_items = get_global_size(0);\r\n\r\n                complex in0, in1;\r\n                in0 = input[(0 * num_work_items) + work_item_id];\r\n                in1 = input[(1 * num_work_items) + work_item_id];\r\n\r\n                if (Ns != 1)\r\n                {\r\n                    float angle = -2 * M_PI * (work_item_id % Ns) / (Ns * 2);\r\n                    in1 = complex_mul(in1, twiddle(1, angle));\r\n                }\r\n\r\n                complex tmp;\r\n                tmp = in0;\r\n                in0 = in0 + in1;\r\n                in1 = tmp - in1;\r\n\r\n                uint Idout = (work_item_id / Ns) * Ns * 2 + (work_item_id % Ns);\r\n                output[(0 * Ns) + Idout] = in0;\r\n                output[(1 * Ns) + Idout] = in1;\r\n            }\r\n            __kernel void FFT_4(__global complex*input, __global complex*output, uint Ns )\n{\r\n                uint work_item_id = get_global_id(0);\r\n                uint num_work_items = get_global_size(0);\r\n\r\n                complex in0, in1, in2, in3;\r\n                in0 = input[(0 * num_work_items) + work_item_id];\r\n                in1 = input[(1 * num_work_items) + work_item_id];\r\n                in2 = input[(2 * num_work_items) + work_item_id];\r\n                in3 = input[(3 * num_work_items) + work_item_id];\r\n\r\n                if (Ns != 1)\r\n                {\r\n                    float angle = -2 * M_PI * (work_item_id % Ns) / (Ns * 2);\r\n                    in1 = complex_mul(in1, twiddle(1, angle));\r\n                    in2 = complex_mul(in2, twiddle(2, angle));\r\n                    in3 = complex_mul(in3, twiddle(3, angle));\r\n\r\n                }\r\n\r\n                complex v0, v1, v2, v3;\r\n                v0 = in0 + in2;\r\n                v2 = in0 - in2;\r\n                v1 = in1 + in3;\r\n                v3 = (complex)(in1.y - in3.y, in3.x - in1.x);\r\n                in0 = v0 + v1;\r\n                in2 = v0 - v1;\r\n                in1 = v2 + v3;\r\n                in3 = v2 - v3;\r\n\r\n                uint Idout = (work_item_id / Ns) * Ns * 4 + (work_item_id % Ns);\r\n                output[(0 * Ns) + Idout] = in0;\r\n                output[(1 * Ns) + Idout] = in1;\r\n                output[(2 * Ns) + Idout] = in2;\r\n                output[(3 * Ns) + Idout] = in3;\r\n            }\r\n\r\n            __kernel void FFT_8(__global complex*input, __global complex*output, uint Ns)\n{\r\n                uint work_item_id = get_global_id(0);\r\n                uint num_work_items = get_global_size(0);\r\n\r\n                complex in0, in1, in2, in3, in4, in5, in6, in7;\r\n                in0 = input[(0 * num_work_items) + work_item_id];\r\n                in1 = input[(1 * num_work_items) + work_item_id];\r\n                in2 = input[(2 * num_work_items) + work_item_id];\r\n                in3 = input[(3 * num_work_items) + work_item_id];\r\n                in4 = input[(4 * num_work_items) + work_item_id];\r\n                in5 = input[(5 * num_work_items) + work_item_id];\r\n                in6 = input[(6 * num_work_items) + work_item_id];\r\n                in7 = input[(7 * num_work_items) + work_item_id];\r\n\r\n                if (Ns != 1)\r\n                {\r\n                    float angle = -2 * M_PI * (work_item_id % Ns) / (Ns * 2);\r\n                    in1 = complex_mul(in1, twiddle(1, angle));\r\n                    in2 = complex_mul(in2, twiddle(2, angle));\r\n                    in3 = complex_mul(in3, twiddle(3, angle));\r\n                    in4 = complex_mul(in4, twiddle(4, angle));\r\n                    in5 = complex_mul(in5, twiddle(5, angle));\r\n                    in6 = complex_mul(in6, twiddle(6, angle));\r\n                    in7 = complex_mul(in7, twiddle(7, angle));\r\n                }\r\n\r\n                complex v0, v1, v2, v3, v4, v5, v6, v7;\r\n                v0 = in0 + in4;\r\n                v4 = in0 - in4;\r\n                v1 = in1 + in5;\r\n                v5 = in1 - in5;\r\n                v2 = in2 + in6;\r\n                v6 = (complex)(in2.y - in6.y, in6.x - in2.x);\r\n                v3 = in3 + in7;\r\n                v7 = (complex)(in3.y - in7.y, in7.x - in3.x);\r\n\r\n                complex tmp;\r\n                tmp = v0;\r\n                v0 = v0 + v2;\r\n                v2 = tmp - v2;\r\n                tmp = v1;\r\n                v1 = v1 + v3;\r\n                v3 = (complex)(tmp.y - v3.y, v3.x - tmp.x);\r\n\r\n                tmp = v4;\r\n                v4 = v4 + v6;\r\n                v6 = tmp - v6;\r\n                tmp = v5;\r\n                v5 = (complex)(M_SQRT1_2 * (v5.x + v7.x + v5.y + v7.y), M_SQRT1_2 * (v5.y + v7.y - v5.x - v7.x));\r\n                v7 = (complex)(M_SQRT1_2 * (v7.x - tmp.x - v7.y + tmp.y), M_SQRT1_2 * (v7.y - tmp.y + v7.x - tmp.x));\r\n\r\n                in0 = v0 + v1;\r\n                in4 = v0 - v1;\r\n\r\n                in1 = v4 + v5;\r\n                in5 = v4 - v5;\r\n\r\n                in2 = v2 + v3;\r\n                in6 = v2 - v3;\r\n\r\n                in3 = v6 + v7;\r\n                in7 = v6 - v7;\r\n\r\n                uint Idout = (work_item_id / Ns) * Ns * 8 + (work_item_id % Ns);\r\n                output[(0 * Ns) + Idout] = in0;\r\n                output[(1 * Ns) + Idout] = in1;\r\n                output[(2 * Ns) + Idout] = in2;\r\n                output[(3 * Ns) + Idout] = in3;\r\n                output[(4 * Ns) + Idout] = in4;\r\n                output[(5 * Ns) + Idout] = in5;\r\n                output[(6 * Ns) + Idout] = in6;\r\n                output[(7 * Ns) + Idout] = in7;\r\n            }\r\n\r\n\r\n            ";
-std::string openclcode_Old =
+std::string openclcode_old = "\r\n\r\ntypedef float2 complex;\r\n\r\n            complex twiddle(uint k, float angle)\r\n            {\r\n                float x; float y = sincos(k * angle, &x); return (complex)(x, y);\r\n            }\r\n\r\n            complex complex_mul(float2 a, float2 b)\r\n            {\r\n                return (complex)(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);\r\n            }\r\n\r\n            __kernel void FFT_2(__global complex*input, __global complex*output, uint Ns ) {\r\n\r\n                uint work_item_id = get_global_id(0);\r\n                uint num_work_items = get_global_size(0);\r\n\r\n                complex in0, in1;\r\n                in0 = input[(0 * num_work_items) + work_item_id];\r\n                in1 = input[(1 * num_work_items) + work_item_id];\r\n\r\n                if (Ns != 1)\r\n                {\r\n                    float angle = -2 * M_PI * (work_item_id % Ns) / (Ns * 2);\r\n                    in1 = complex_mul(in1, twiddle(1, angle));\r\n                }\r\n\r\n                complex tmp;\r\n                tmp = in0;\r\n                in0 = in0 + in1;\r\n                in1 = tmp - in1;\r\n\r\n                uint Idout = (work_item_id / Ns) * Ns * 2 + (work_item_id % Ns);\r\n                output[(0 * Ns) + Idout] = in0;\r\n                output[(1 * Ns) + Idout] = in1;\r\n            }\r\n            __kernel void FFT_4(__global complex*input, __global complex*output, uint Ns )\n{\r\n                uint work_item_id = get_global_id(0);\r\n                uint num_work_items = get_global_size(0);\r\n\r\n                complex in0, in1, in2, in3;\r\n                in0 = input[(0 * num_work_items) + work_item_id];\r\n                in1 = input[(1 * num_work_items) + work_item_id];\r\n                in2 = input[(2 * num_work_items) + work_item_id];\r\n                in3 = input[(3 * num_work_items) + work_item_id];\r\n\r\n                if (Ns != 1)\r\n                {\r\n                    float angle = -2 * M_PI * (work_item_id % Ns) / (Ns * 2);\r\n                    in1 = complex_mul(in1, twiddle(1, angle));\r\n                    in2 = complex_mul(in2, twiddle(2, angle));\r\n                    in3 = complex_mul(in3, twiddle(3, angle));\r\n\r\n                }\r\n\r\n                complex v0, v1, v2, v3;\r\n                v0 = in0 + in2;\r\n                v2 = in0 - in2;\r\n                v1 = in1 + in3;\r\n                v3 = (complex)(in1.y - in3.y, in3.x - in1.x);\r\n                in0 = v0 + v1;\r\n                in2 = v0 - v1;\r\n                in1 = v2 + v3;\r\n                in3 = v2 - v3;\r\n\r\n                uint Idout = (work_item_id / Ns) * Ns * 4 + (work_item_id % Ns);\r\n                output[(0 * Ns) + Idout] = in0;\r\n                output[(1 * Ns) + Idout] = in1;\r\n                output[(2 * Ns) + Idout] = in2;\r\n                output[(3 * Ns) + Idout] = in3;\r\n            }\r\n\r\n            __kernel void FFT_8(__global complex*input, __global complex*output, uint Ns)\n{\r\n                uint work_item_id = get_global_id(0);\r\n                uint num_work_items = get_global_size(0);\r\n\r\n                complex in0, in1, in2, in3, in4, in5, in6, in7;\r\n                in0 = input[(0 * num_work_items) + work_item_id];\r\n                in1 = input[(1 * num_work_items) + work_item_id];\r\n                in2 = input[(2 * num_work_items) + work_item_id];\r\n                in3 = input[(3 * num_work_items) + work_item_id];\r\n                in4 = input[(4 * num_work_items) + work_item_id];\r\n                in5 = input[(5 * num_work_items) + work_item_id];\r\n                in6 = input[(6 * num_work_items) + work_item_id];\r\n                in7 = input[(7 * num_work_items) + work_item_id];\r\n\r\n                if (Ns != 1)\r\n                {\r\n                    float angle = -2 * M_PI * (work_item_id % Ns) / (Ns * 2);\r\n                    in1 = complex_mul(in1, twiddle(1, angle));\r\n                    in2 = complex_mul(in2, twiddle(2, angle));\r\n                    in3 = complex_mul(in3, twiddle(3, angle));\r\n                    in4 = complex_mul(in4, twiddle(4, angle));\r\n                    in5 = complex_mul(in5, twiddle(5, angle));\r\n                    in6 = complex_mul(in6, twiddle(6, angle));\r\n                    in7 = complex_mul(in7, twiddle(7, angle));\r\n                }\r\n\r\n                complex v0, v1, v2, v3, v4, v5, v6, v7;\r\n                v0 = in0 + in4;\r\n                v4 = in0 - in4;\r\n                v1 = in1 + in5;\r\n                v5 = in1 - in5;\r\n                v2 = in2 + in6;\r\n                v6 = (complex)(in2.y - in6.y, in6.x - in2.x);\r\n                v3 = in3 + in7;\r\n                v7 = (complex)(in3.y - in7.y, in7.x - in3.x);\r\n\r\n                complex tmp;\r\n                tmp = v0;\r\n                v0 = v0 + v2;\r\n                v2 = tmp - v2;\r\n                tmp = v1;\r\n                v1 = v1 + v3;\r\n                v3 = (complex)(tmp.y - v3.y, v3.x - tmp.x);\r\n\r\n                tmp = v4;\r\n                v4 = v4 + v6;\r\n                v6 = tmp - v6;\r\n                tmp = v5;\r\n                v5 = (complex)(M_SQRT1_2 * (v5.x + v7.x + v5.y + v7.y), M_SQRT1_2 * (v5.y + v7.y - v5.x - v7.x));\r\n                v7 = (complex)(M_SQRT1_2 * (v7.x - tmp.x - v7.y + tmp.y), M_SQRT1_2 * (v7.y - tmp.y + v7.x - tmp.x));\r\n\r\n                in0 = v0 + v1;\r\n                in4 = v0 - v1;\r\n\r\n                in1 = v4 + v5;\r\n                in5 = v4 - v5;\r\n\r\n                in2 = v2 + v3;\r\n                in6 = v2 - v3;\r\n\r\n                in3 = v6 + v7;\r\n                in7 = v6 - v7;\r\n\r\n                uint Idout = (work_item_id / Ns) * Ns * 8 + (work_item_id % Ns);\r\n                output[(0 * Ns) + Idout] = in0;\r\n                output[(1 * Ns) + Idout] = in1;\r\n                output[(2 * Ns) + Idout] = in2;\r\n                output[(3 * Ns) + Idout] = in3;\r\n                output[(4 * Ns) + Idout] = in4;\r\n                output[(5 * Ns) + Idout] = in5;\r\n                output[(6 * Ns) + Idout] = in6;\r\n                output[(7 * Ns) + Idout] = in7;\r\n            }\r\n\r\n\r\n            ";
+std::string openclcode =
 "typedef float2 complex;"
 
 "complex	twiddle(uint k, float angle) {"
@@ -605,6 +646,7 @@ std::string openclcode_Old =
 "uint work_item_id = get_global_id(0);								"
 "uint num_work_items = get_global_size(0);						   "
 "																   "
+"uint Idout = (work_item_id / Ns)*Ns * 2 + (work_item_id%Ns);	   "
 "complex in0, in1;												   "
 "in0 = input[(0 * num_work_items) + work_item_id];				   "
 "in1 = input[(1 * num_work_items) + work_item_id];				   "
@@ -620,7 +662,6 @@ std::string openclcode_Old =
 "in0 = in0 + in1;												   "
 "in1 = tmp - in1;												   "
 "																   "
-"uint Idout = (work_item_id / Ns)*Ns * 2 + (work_item_id%Ns);	   "
 "output[(0 * Ns) + Idout] = in0;								   "
 "output[(1 * Ns) + Idout] = in1;								   "
 "}"
@@ -665,7 +706,8 @@ std::string openclcode_Old =
 "{																												   "
 "	uint work_item_id = get_global_id(0);																		   "
 "	uint num_work_items = get_global_size(0);																	   "
-"																												   "
+"		uint Idout = (work_item_id / Ns)*Ns * 8 + (work_item_id%Ns);																										   "
+
 "	complex  in0, in1, in2, in3, in4, in5, in6, in7;															   "
 "	in0 = input[(0 * num_work_items) + work_item_id];															   "
 "	in1 = input[(1 * num_work_items) + work_item_id];															   "
@@ -725,7 +767,7 @@ std::string openclcode_Old =
 "	in3 = v6 + v7;																								   "
 "	in7 = v6 - v7;																								   "
 "																												   "
-"	uint Idout = (work_item_id / Ns)*Ns * 8 + (work_item_id%Ns);												   "
+"													   "
 "	output[(0 * Ns) + Idout] = in0;																				   "
 "	output[(1 * Ns) + Idout] = in1;																				   "
 "	output[(2 * Ns) + Idout] = in2;																				   "
@@ -800,7 +842,7 @@ int CreateAndBuildProgram(ocl_args_d_t *ocl)
 		}
 	}
 
-Finish:
+	Finish:
 	if (source)
 	{
 		delete[] source;
@@ -976,6 +1018,8 @@ int _tmain(int argc, TCHAR* argv[])
 	LogInfo("以下是input\n");
 	//random input
 	generateInput(input, size);
+	/*LogInfo("以下是随机output\n");
+	generateInput(output, size);*/
 
 	// Create OpenCL buffers from host memory
 	// These buffers will be used later by the OpenCL kernel
@@ -1033,7 +1077,7 @@ int _tmain(int argc, TCHAR* argv[])
 		}
 	}
 	
-
+	//clEnqueueBarrier(ocl.commandQueue);
 	if (remainder_stages == 1) {
 		ocl.FFT2_kernel = clCreateKernel(ocl.program, "FFT_2", &err);
 		if (CL_SUCCESS != err)
@@ -1098,7 +1142,10 @@ int _tmain(int argc, TCHAR* argv[])
 	if (queueProfilingEnable)
 		QueryPerformanceCounter(&performanceCountNDRangeStop);
 
-	ReadAndVerify(ocl.commandQueue, ocl.srcMem, size, output);
+
+	///!!!非常重要，必须读取dstMem,否则NVIDIA显卡读取不到数据，找了一天才找到原因
+	//ReadAndVerify(ocl.commandQueue, ocl.srcMem, size, output);
+	ReadAndVerify(ocl.commandQueue, ocl.dstMem, size, output);
 
 	int outputLength = sizeof(output);
 
@@ -1130,6 +1177,8 @@ int _tmain(int argc, TCHAR* argv[])
 	_aligned_free(input);
 	_aligned_free(output);
 	//extra
+	char str[] = "Hello C++";
 
+	std::cout << "Value of str is : " << str;
 	return 0;
 }
