@@ -521,8 +521,8 @@ void generateInput(cl_float2* inputArray, cl_uint size)
 	for (cl_uint i = 0; i < size; ++i)
 	{
 		inputArray[i].x = ((float)rand() / (float)(RAND_MAX)) * (float)1.0;
-		//inputArray[i].y = ((float)rand() / (float)(RAND_MAX)) * (float)1.0;
-		inputArray[i].y = 0;
+		inputArray[i].y = ((float)rand() / (float)(RAND_MAX)) * (float)1.0;
+		//inputArray[i].y = 0;
 		LogError("x: %f.", inputArray[i].x);
 		LogError("y: %f.\n", inputArray[i].y);
 	}
@@ -1169,10 +1169,10 @@ int _tmain(int argc, TCHAR* argv[])
 			1000.0f*(float)(performanceCountNDRangeStop.QuadPart - performanceCountNDRangeStart.QuadPart) / (float)perfFrequency.QuadPart);
 	}
 
-	LogInfo("以下是output\n");
-	PrintOutput(output, size);
-	LogInfo("以下是input\n");
-	PrintOutput(input, size);
+	//LogInfo("以下是output\n");
+	//PrintOutput(output, size);
+	//LogInfo("以下是input\n");
+	//PrintOutput(input, size);
 
 	_aligned_free(input);
 	_aligned_free(output);
